@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoltSentry - IoT 스마트 교실 에너지 모니터링 대시보드</title>
+    <!-- Tailwind CSS (스타일링) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js (그래프) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- FontAwesome (아이콘) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind 설정 -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkbg: '#0f172a',
+                        cardbg: '#1e293b',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- 커스텀 CSS 및 폰트 -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+        
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background-color: #0b0f19;
+            color: #f3f4f6;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .pulse-danger { animation: pulse-red 2s infinite; }
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+            50% { box-shadow: 0 0 15px 5px rgba(239, 68, 68, 0.8); }
+        }
+        
+        /* 스크롤바 디자인 */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0b0f19; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
+
+    <!-- 상단 네비게이션 헤더 -->
+    <header class="sticky top-0 z-50 glass border-b border-slate-800 px-4 lg:px-8 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-slate-950 font-bold text-xl shadow-lg shadow-emerald-500/20">
+                <i class="fa-solid fa-bolt"></i>
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <h1 class="font-bold text-lg tracking-tight text-white">VoltSentry <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 mono">v1.0-EE</span></h1>
+                </div>
+                <p class="text-xs text-slate-400 hidden sm:block">IoT 센서 기반 스마트 교실 에너지 관제 시스템 (전자공학과 융합 프로젝트)</p>
+            </div>
+        </div>
+
+        <!-- 글로벌 상태 뱃지 (데스크톱 전용) -->
+        <div class="hidden md:flex items-center gap-4 text-xs mono">
+            <div class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-slate-400">ESP32 Node:</span>
+                <span class="text-emerald-400 font-semibold">8/8 ONLINE</span>
+            </div>
+            <div class="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 flex items-center gap-2">
+                <i class="fa-solid fa-plug text-cyan-400"></i>
+                <span class="text-slate-400">총 전력 부하:</span>
+                <span id="global-power" class="text-cyan-400 font-bold text-sm">4.82 kW</span>
+            </div>
+            <button onclick="toggleSystemOverride()" id="btn-master-eco" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-semibold transition flex items-center gap-2 shadow-md shadow-emerald-600/30">
+                <i class="fa-solid fa-leaf"></i>
+                전교 생태 절전
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 대시보드 콘텐츠 -->
+    <main class="flex-1 p-4 lg:p-6 max-w-7xl mx-auto w-full space-y-6">
+
+        <!-- 최상단 핵심 지표(KPI) 그리드 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- 낭비 전력 -->
+            <div class="glass rounded-2xl p-4 border-l-4 border-l-red-500">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">실시간 낭비 예상 전력</p>
+                        <h3 id="stat-wasted-watts" class="text-2xl font-bold text-red-400 mt-1 mono">1,420 W</h3>
+                    </div>
+                    <div class="w-10 h-10 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center"><i class="fa-solid fa-triangle-exclamation text-lg"></i></div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2">빈 교실(재실 0명) 가동 전력</p>
+            </div>
+            <!-- 절감 전력 -->
+            <div class="glass rounded-2xl p-4 border-l-4 border-l-emerald-500">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">오늘 절감한 전력량</p>
+                        <h3 id="stat-saved-kwh" class="text-2xl font-bold text-emerald-400 mt-1 mono">18.4 kWh</h3>
+                    </div>
+                    <div class="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center"><i class="fa-solid fa-chart-line text-lg"></i></div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2">전기요금 약 <span id="stat-saved-money" class="text-emerald-300 font-bold">2,390원</span> 절감</p>
+            </div>
+            <!-- 경고 교실 수 -->
+            <div class="glass rounded-2xl p-4 border-l-4 border-l-amber-500">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">낭비 의심 교실</p>
+                        <h3 id="stat-warning-count" class="text-2xl font-bold text-amber-400 mt-1 mono">2개 교실</h3>
+                    </div>
+                    <div class="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center"><i class="fa-solid fa-door-open text-lg"></i></div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2">이동수업 중 전원 미차단</p>
+            </div>
+            <!-- 하드웨어 상태 -->
+            <div class="glass rounded-2xl p-4 border-l-4 border-l-cyan-500">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-xs text-slate-400 font-medium">IoT 임베디드 연동</p>
+                        <h3 class="text-lg font-bold text-cyan-400 mt-1 mono">PIR + ACS712</h3>
+                    </div>
+                    <div class="w-10 h-10 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center"><i class="fa-solid fa-microchip text-lg"></i></div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2">AC ADC 샘플링 rate: 100Hz</p>
+            </div>
+        </div>
+
+        <!-- 메인 레이아웃: 평면도 & 하드웨어 인스펙터 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 좌측: 교실 평면도 그리드 (Live Map) -->
+            <div class="lg:col-span-2 glass rounded-2xl p-5 space-y-4">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                    <div>
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-chalkboard-user text-emerald-400"></i>
+                            학교 본관 실시간 관제 평면도
+                        </h2>
+                        <p class="text-xs text-slate-400">교실 카드를 클릭하여 원격 제어 및 센서 데이터를 확인하세요.</p>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs">
+                        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-500/30 border border-emerald-500 inline-block"></span> 재실 중</span>
+                        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-500/30 border border-red-500 inline-block"></span> 낭비 경고</span>
+                    </div>
+                </div>
+                <div id="classroom-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    <!-- JavaScript로 동적 렌더링 됨 -->
+                </div>
+            </div>
+
+            <!-- 우측: 하드웨어 센서 노드 검신기 (Hardware Inspector) -->
+            <div class="glass rounded-2xl p-5 space-y-4 border border-cyan-500/20">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <h3 class="font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-microchip text-cyan-400"></i> 하드웨어 검신기
+                    </h3>
+                    <span id="selected-node-tag" class="text-xs mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">선택됨</span>
+                </div>
+
+                <div class="space-y-4">
+                    <!-- 센서 실시간 수치 -->
+                    <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-800 space-y-2 text-xs mono">
+                        <div class="flex justify-between text-slate-400"><span>IoT 컨트롤러:</span><span class="text-white">ESP32-WROOM-32</span></div>
+                        <div class="flex justify-between text-slate-400"><span>재실 감지 센서:</span><span id="sensor-pir-status" class="text-emerald-400 font-bold">PIR HIGH</span></div>
+                        <div class="flex justify-between text-slate-400"><span>전류 측정 센서:</span><span class="text-white">ACS712 (Hall Effect)</span></div>
+                        <div class="flex justify-between text-slate-400 border-t border-slate-800 pt-2"><span>실시간 전류 (I):</span><span id="sensor-current-val" class="text-cyan-400 font-bold">0.00 A</span></div>
+                        <div class="flex justify-between text-slate-400"><span>소비 전력 (P=V×I):</span><span id="sensor-power-calc" class="text-yellow-400 font-bold text-sm">0 W</span></div>
+                    </div>
+
+                    <!-- 릴레이 제어 버튼 -->
+                    <div class="space-y-2">
+                        <p class="text-xs font-medium text-slate-300">원격 릴레이(Relay) 제어</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="toggleRelay('light')" id="btn-relay-light" class="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium border border-slate-700 flex items-center justify-center gap-2 transition">
+                                <i class="fa-solid fa-lightbulb"></i> <span>전등</span>
+                            </button>
+                            <button onclick="toggleRelay('ac')" id="btn-relay-ac" class="py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium border border-slate-700 flex items-center justify-center gap-2 transition">
+                                <i class="fa-solid fa-snowflake"></i> <span>에어컨</span>
+                            </button>
+                        </div>
+                        <button onclick="triggerSensorSimulation()" class="w-full py-2 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition flex items-center justify-center gap-2 mt-2">
+                            <i class="fa-solid fa-person-running"></i> 이동 수업 가상 시뮬레이션
+                        </button>
+                    </div>
+
+                    <!-- 오실로스코프 시뮬레이션 -->
+                    <div class="pt-2">
+                        <p class="text-[11px] text-slate-400 mb-1 mono">ACS712 Analog Signal (220V AC)</p>
+                        <div class="h-20 bg-slate-950 rounded-lg border border-slate-800 overflow-hidden relative">
+                            <canvas id="waveformCanvas" class="w-full h-full"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하단 레이아웃: 전력 차트 & 랭킹 리더보드 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 전력 소비 트렌드 차트 -->
+            <div class="lg:col-span-2 glass rounded-2xl p-5 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div>
+                        <h3 class="font-bold text-white flex items-center gap-2"><i class="fa-solid fa-chart-area text-cyan-400"></i> 교시별 전력 소비 트렌드</h3>
+                        <p class="text-xs text-slate-400">쉬는 시간 및 이동 수업 시간대의 전력 감소 효과 관측</p>
+                    </div>
+                </div>
+                <div class="h-64 w-full"><canvas id="powerChart"></canvas></div>
+            </div>
+
+            <!-- 학급별 에코 챔피언 리더보드 -->
+            <div class="glass rounded-2xl p-5 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <h3 class="font-bold text-white flex items-center gap-2"><i class="fa-solid fa-trophy text-amber-400"></i> 에코 챔피언 랭킹</h3>
+                    <span class="text-xs text-emerald-400 font-medium">이번 주 1위: 1-3반</span>
+                </div>
+                <p class="text-xs text-slate-400">잔소리 대신, 절약왕 학급에게 포상을 부여합니다!</p>
+                
+                <div id="leaderboard-list" class="space-y-2.5">
+                    <!-- JS 렌더링 -->
+                </div>
+
+                <div class="pt-2 border-t border-slate-800">
+                    <div class="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3 flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0"><i class="fa-solid fa-gift"></i></div>
+                        <div class="text-xs">
+                            <p class="font-bold text-emerald-300">이달의 보상</p>
+                            <p class="text-slate-400">1위 학급 매점 간식 쿠폰 지급!</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 커스텀 토스트 알림 컨테이너 -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <footer class="glass border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-500 mt-8">
+        <p>© 2026 VoltSentry Project | 스마트 교실 에너지 관제 시스템</p>
+        <p class="mt-1 mono text-[11px] text-slate-600">Built with HTML5, Tailwind CSS, Chart.js</p>
+    </footer>
+
+    <!-- 로직 스크립트 -->
+    <script>
+        // 초기 교실 데이터 세팅 (Mock Data)
+        const classrooms = [
+            { id: 'c1-1', name: '1학년 1반', occupied: true,  light: true,  ac: true,  watts: 628, pirDelay: 0, ip: '192.168.1.101' },
+            { id: 'c1-2', name: '1학년 2반', occupied: false, light: true,  ac: true,  watts: 710, pirDelay: 12, ip: '192.168.1.102', warning: true }, // 낭비 중
+            { id: 'c1-3', name: '1학년 3반', occupied: true,  light: true,  ac: false, watts: 180, pirDelay: 0, ip: '192.168.1.103' },
+            { id: 'c1-4', name: '1학년 4반', occupied: false, light: false, ac: false, watts: 0,   pirDelay: 25, ip: '192.168.1.104' },
+            { id: 'c1-5', name: '1학년 5반', occupied: false, light: true,  ac: false, watts: 120, pirDelay: 8,  ip: '192.168.1.105', warning: true }, // 낭비 중
+            { id: 'c1-6', name: '1학년 6반', occupied: true,  light: true,  ac: true,  watts: 650, pirDelay: 0, ip: '192.168.1.106' },
+            { id: 'csci', name: '과학실',     occupied: false, light: false, ac: false, watts: 0,   pirDelay: 40, ip: '192.168.1.107' },
+            { id: 'cgym', name: '체육관',     occupied: true,  light: true,  ac: true,  watts: 2500,pirDelay: 0, ip: '192.168.1.108' },
+        ];
+
+        let selectedClassId = 'c1-1';
+        let isMasterEcoActive = false;
+
+        // 1. 대시보드 교실 그리드 렌더링
+        function renderClassroomGrid() {
+            const grid = document.getElementById('classroom-grid');
+            grid.innerHTML = '';
+
+            classrooms.forEach(c => {
+                const isSelected = c.id === selectedClassId;
+                const isWasting = !c.occupied && (c.light || c.ac);
+                c.warning = isWasting;
+
+                let borderStyle = 'border-slate-800';
+                let bgStyle = 'bg-slate-900/60';
+                let badge = `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400">소등 완료</span>`;
+
+                if (c.occupied) {
+                    borderStyle = 'border-emerald-500/50';
+                    bgStyle = 'bg-emerald-950/20';
+                    badge = `<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-semibold border border-emerald-500/30">재실 중</span>`;
+                } else if (isWasting) {
+                    borderStyle = 'border-red-500/80 pulse-danger';
+                    bgStyle = 'bg-red-950/30';
+                    badge = `<span class="px-2 py-0.5 rounded text-[10px] bg-red-500/20 text-red-400 font-bold border border-red-500/40 animate-pulse">낭비 경고</span>`;
+                }
+
+                if (isSelected) borderStyle += ' ring-2 ring-cyan-400';
+
+                grid.innerHTML += `
+                    <div onclick="selectClassroom('${c.id}')" class="p-3.5 rounded-xl border ${borderStyle} ${bgStyle} cursor-pointer hover:border-cyan-400 transition flex flex-col justify-between space-y-3">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h4 class="font-bold text-sm text-white">${c.name}</h4>
+                                <p class="text-[10px] text-slate-500 mono">${c.ip}</p>
+                            </div>
+                            ${badge}
+                        </div>
+                        <div class="grid grid-cols-2 gap-1 text-[11px]">
+                            <div class="flex items-center gap-1.5 ${c.light ? 'text-amber-300' : 'text-slate-600'}">
+                                <i class="fa-solid fa-lightbulb"></i> <span>전등: ${c.light ? 'ON' : 'OFF'}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 ${c.ac ? 'text-cyan-300' : 'text-slate-600'}">
+                                <i class="fa-solid fa-snowflake"></i> <span>냉방: ${c.ac ? 'ON' : 'OFF'}</span>
+                            </div>
+                        </div>
+                        <div class="pt-2 border-t border-slate-800/80 flex justify-between items-center text-xs mono">
+                            <span class="text-slate-400">부하:</span>
+                            <span class="${c.watts > 0 ? (isWasting ? 'text-red-400 font-bold' : 'text-emerald-400') : 'text-slate-500'}">${c.watts} W</span>
+                        </div>
+                    </div>
+                `;
+            });
+            updateHardwareInspector();
+            updateKPIs();
+        }
+
+        function selectClassroom(id) {
+            selectedClassId = id;
+            renderClassroomGrid();
+        }
+
+        // 2. 하드웨어 인스펙터 패널 업데이트
+        function updateHardwareInspector() {
+            const current = classrooms.find(c => c.id === selectedClassId);
+            if (!current) return;
+
+            document.getElementById('selected-node-tag').innerText = `${current.name} (${current.ip})`;
+            
+            const pirElem = document.getElementById('sensor-pir-status');
+            if (current.occupied) {
+                pirElem.className = 'text-emerald-400 font-bold';
+                pirElem.innerText = 'MOTION DETECTED (HIGH)';
+            } else {
+                pirElem.className = 'text-amber-400 font-bold';
+                pirElem.innerText = `IDLE (${current.pirDelay}분 이동 없음)`;
+            }
+
+            const currentAmp = (current.watts / 220).toFixed(2);
+            document.getElementById('sensor-current-val').innerText = `${currentAmp} A`;
+            document.getElementById('sensor-power-calc').innerText = `${current.watts} W`;
+
+            // 버튼 색상 업데이트
+            const btnLight = document.getElementById('btn-relay-light');
+            btnLight.className = current.light ? 'py-2 px-3 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-medium flex items-center justify-center gap-2 transition' : 'py-2 px-3 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-xs font-medium flex items-center justify-center gap-2 transition';
+            
+            const btnAc = document.getElementById('btn-relay-ac');
+            btnAc.className = current.ac ? 'py-2 px-3 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-xs font-medium flex items-center justify-center gap-2 transition' : 'py-2 px-3 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 text-xs font-medium flex items-center justify-center gap-2 transition';
+        }
+
+        // 3. 릴레이 원격 제어 (버튼 클릭)
+        function toggleRelay(type) {
+            const current = classrooms.find(c => c.id === selectedClassId);
+            if (!current) return;
+
+            if (type === 'light') {
+                current.light = !current.light;
+                showToast(`${current.name} 전등 스위치 ${current.light ? 'ON' : 'OFF'} 제어 완료`, current.light ? 'info' : 'success');
+            } else if (type === 'ac') {
+                current.ac = !current.ac;
+                showToast(`${current.name} 에어컨 스위치 ${current.ac ? 'ON' : 'OFF'} 제어 완료`, current.ac ? 'info' : 'success');
+            }
+            current.watts = (current.light ? 180 : 0) + (current.ac ? 500 : 0);
+            renderClassroomGrid();
+        }
+
+        // 4. 가상 시뮬레이션 (이동 수업 상황 발생)
+        function triggerSensorSimulation() {
+            const current = classrooms.find(c => c.id === selectedClassId);
+            if (!current) return;
+
+            current.occupied = !current.occupied;
+            if (!current.occupied) {
+                current.pirDelay = 15;
+                showToast(`[시뮬레이션] ${current.name} 학생들 체육관 이동! (재실 센서 LOW)`, 'warning');
+            } else {
+                current.pirDelay = 0;
+                showToast(`[시뮬레이션] ${current.name} 학생 교실 복귀 감지 (재실 센서 HIGH)`, 'info');
+            }
+            renderClassroomGrid();
+        }
+
+        // 5. 전교 일괄 절전 모드
+        function toggleSystemOverride() {
+            isMasterEcoActive = !isMasterEcoActive;
+            const btn = document.getElementById('btn-master-eco');
+
+            if (isMasterEcoActive) {
+                classrooms.forEach(c => {
+                    if (!c.occupied) { c.light = false; c.ac = false; c.watts = 0; }
+                });
+                btn.className = 'px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-sans font-semibold transition flex items-center gap-2 shadow-md shadow-red-600/30';
+                btn.innerHTML = `<i class="fa-solid fa-power-off"></i> 절전 모드 해제`;
+                showToast('전교 생태 절전 실행: 빈 교실 전원 일괄 차단 완료!', 'success');
+            } else {
+                btn.className = 'px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-sans font-semibold transition flex items-center gap-2 shadow-md shadow-emerald-600/30';
+                btn.innerHTML = `<i class="fa-solid fa-leaf"></i> 전교 생태 절전`;
+                showToast('전교 생태 절전 모드가 해제되었습니다.', 'info');
+            }
+            renderClassroomGrid();
+        }
+
+        // 6. 상단 KPI 통계 업데이트
+        function updateKPIs() {
+            let wastedWatts = 0, totalWatts = 0, warningCount = 0;
+            classrooms.forEach(c => {
+                totalWatts += c.watts;
+                if (!c.occupied && (c.light || c.ac)) { wastedWatts += c.watts; warningCount++; }
+            });
+            document.getElementById('stat-wasted-watts').innerText = `${wastedWatts.toLocaleString()} W`;
+            document.getElementById('stat-warning-count').innerText = `${warningCount}개 교실`;
+            document.getElementById('global-power').innerText = `${(totalWatts / 1000).toFixed(2)} kW`;
+        }
+
+        // 7. 리더보드 렌더링
+        function renderLeaderboard() {
+            const data = [
+                { rank: 1, name: '1학년 3반', score: '98점', count: '0회 낭비', badge: '🥇 최우수' },
+                { rank: 2, name: '1학년 4반', score: '94점', count: '1회 낭비', badge: '🥈 우수' },
+                { rank: 3, name: '1학년 1반', score: '88점', count: '2회 낭비', badge: '🥉 성실' },
+                { rank: 4, name: '1학년 6반', score: '82점', count: '3회 낭비', badge: '보통' },
+                { rank: 5, name: '1학년 2반', score: '65점', count: '7회 낭비', badge: '주의' }
+            ];
+            const list = document.getElementById('leaderboard-list');
+            data.forEach(item => {
+                const isTop = item.rank === 1;
+                list.innerHTML += `
+                    <div class="flex items-center justify-between p-2.5 rounded-xl ${isTop ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-slate-900/40 border border-slate-800'} text-xs">
+                        <div class="flex items-center gap-3">
+                            <span class="w-6 h-6 rounded-full ${isTop ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'} flex items-center justify-center mono">${item.rank}</span>
+                            <div><p class="font-bold text-white">${item.name}</p><p class="text-[10px] text-slate-400">낭비 건수: ${item.count}</p></div>
+                        </div>
+                        <div class="text-right">
+                            <span class="font-bold text-emerald-400 mono">${item.score}</span>
+                            <p class="text-[10px] ${isTop ? 'text-amber-300' : 'text-slate-500'}">${item.badge}</p>
+                        </div>
+                    </div>`;
+            });
+        }
+
+        // 8. 오실로스코프 (사인파) 애니메이션
+        function initWaveformCanvas() {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            let step = 0;
+
+            function resize() {
+                canvas.width = canvas.parentElement.clientWidth;
+                canvas.height = canvas.parentElement.clientHeight;
+            }
+            resize(); window.addEventListener('resize', resize);
+
+            function draw() {
+                ctx.fillStyle = '#020617';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.lineWidth = 2; ctx.strokeStyle = '#38bdf8'; ctx.beginPath();
+
+                const current = classrooms.find(c => c.id === selectedClassId);
+                const amp = current ? (current.watts / 220) : 1;
+                const heightScale = Math.min(amp * 4, canvas.height / 2 - 5);
+
+                for (let x = 0; x < canvas.width; x++) {
+                    const y = canvas.height / 2 + Math.sin((x + step) * 0.08) * heightScale;
+                    if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke(); step += 2; requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        // 9. Chart.js 그래프 초기화
+        function initChart() {
+            const ctx = document.getElementById('powerChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['1교시', '2교시', '쉬는시간(이동)', '3교시', '4교시', '점심시간', '5교시(체육)', '6교시'],
+                    datasets: [
+                        { label: '기존 전력 소비 (kW)', data: [4.2, 4.5, 4.1, 4.6, 4.5, 5.2, 4.8, 4.3], borderColor: '#ef4444', borderDash: [5, 5], tension: 0.3 },
+                        { label: 'VoltSentry 도입 후 (kW)', data: [4.2, 4.4, 2.1, 4.5, 4.4, 2.4, 1.5, 4.2], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)', fill: true, tension: 0.3 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#94a3b8', font: { family: 'Pretendard', size: 11 } } } },
+                    scales: {
+                        x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                        y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+                    }
+                }
+            });
+        }
+
+        // 10. 커스텀 토스트 알림 (alert 대체)
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let bg = 'bg-slate-800 border-slate-700 text-white', icon = 'fa-circle-info text-cyan-400';
+
+            if (type === 'success') { bg = 'bg-emerald-950 border-emerald-500/50 text-emerald-100'; icon = 'fa-circle-check text-emerald-400'; }
+            else if (type === 'warning') { bg = 'bg-amber-950 border-amber-500/50 text-amber-100'; icon = 'fa-triangle-exclamation text-amber-400'; }
+
+            toast.className = `p-3 rounded-xl border ${bg} shadow-lg text-xs flex items-center gap-2.5 transition-all duration-300 transform translate-y-2 pointer-events-auto`;
+            toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+
+            setTimeout(() => { toast.classList.add('opacity-0', '-translate-y-2'); setTimeout(() => toast.remove(), 300); }, 3000);
+        }
+
+        // 초기화 실행
+        window.onload = function () {
+            renderClassroomGrid();
+            renderLeaderboard();
+            initWaveformCanvas();
+            initChart();
+
+            // 약간의 실시간 전력 변동 시뮬레이션
+            setInterval(() => {
+                classrooms.forEach(c => {
+                    if (c.occupied && c.ac) c.watts = 600 + Math.floor(Math.random() * 60);
+                });
+                renderClassroomGrid();
+            }, 3000);
+        };
+    </script>
+</body>
+</html>
